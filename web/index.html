@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Simulation d'essaim de drones</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>Essaim de drones</h1>
+      <p class="subtitle">Simulation multi-agent (prototype)</p>
+
+      <form id="config-form" class="config-form">
+        <h2>Paramètres</h2>
+
+        <label>
+          Nombre de drones
+          <input type="number" name="numDrones" value="20" min="1" max="200" />
+        </label>
+
+        <label>
+          Survivants
+          <input type="number" name="numSurvivors" value="5" min="0" max="100" />
+        </label>
+
+        <label>
+          Traces de vie
+          <input type="number" name="numTraces" value="8" min="0" max="200" />
+        </label>
+
+        <label>
+          Vitesse des drones
+          <input type="number" step="5" name="droneSpeed" value="50" />
+        </label>
+
+        <label>
+          Rayon de détection
+          <input type="number" name="detectionRadius" value="40" />
+        </label>
+
+        <label>
+          Rayon de communication
+          <input type="number" name="commRadius" value="150" />
+        </label>
+
+        <label>
+          Aides max par trace
+          <input type="number" name="maxHelpersPerHit" value="3" min="1" max="20" />
+        </label>
+
+        <button type="submit" class="btn primary">Appliquer &amp; reset</button>
+      </form>
+
+      <div class="controls">
+        <button id="toggle-btn" class="btn secondary">⏸ Pause</button>
+        <p id="status-text" class="status">Temps : 0.0 s</p>
+      </div>
+
+      <div class="legend">
+        <h2>Légende</h2>
+        <ul>
+          <li><span class="dot drone-searching"></span> Drone en recherche</li>
+          <li><span class="dot drone-responding"></span> Drone appelé en renfort</li>
+          <li><span class="dot drone-hovering"></span> Drone en survol (survivant trouvé)</li>
+          <li><span class="dot trace"></span> Trace de vie</li>
+          <li><span class="dot survivor"></span> Survivant</li>
+        </ul>
+      </div>
+    </aside>
+
+    <main class="main">
+      <canvas id="sim-canvas" width="1000" height="700"></canvas>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
