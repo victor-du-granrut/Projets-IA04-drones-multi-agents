@@ -371,9 +371,6 @@ func (s *Simulation) Reset(cfg SimConfig) {
 				rMax = 0
 			}
 
-			// On choisit rho dans [0, rMax]
-			// (option simple ; si tu veux uniforme en surface,
-			// tu peux faire rho := math.Sqrt(rand.Float64()) * rMax)
 			rho := rand.Float64() * rMax
 			theta := rand.Float64() * 2 * math.Pi
 
