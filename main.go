@@ -23,6 +23,7 @@ const (
 	ModeSearching  DroneMode = "searching"
 	ModeResponding DroneMode = "responding"
 	ModeHovering   DroneMode = "hovering"
+	ModeReturning  DroneMode = "returning"
 )
 
 type Drone struct {
@@ -38,6 +39,13 @@ type Drone struct {
 	FoundID   int       `json:"foundID"`
 
 	RespondTimer float64 `json:"respondTimer"`
+
+	// per-drone parameters
+	Speed             float64 `json:"speed"`
+	Weight            float64 `json:"weight"`
+	Autonomy          float64 `json:"autonomy"`
+	RemainingAutonomy float64 `json:"remainingAutonomy"`
+	DetectionRadius   float64 `json:"detectionRadius"`
 }
 
 type Survivor struct {
@@ -56,17 +64,31 @@ type Trace struct {
 	Consumed bool    `json:"consumed"`
 }
 
+// type of drones, loaded from JSON
+type DroneType struct {
+	Name            string  `json:"name"`
+	Count           int     `json:"count"`
+	Speed           float64 `json:"speed"`
+	Weight          float64 `json:"weight"`
+	Autonomy        float64 `json:"autonomy"`        // total range
+	DetectionRadius float64 `json:"detectionRadius"` // per-type detection radius
+}
+
 type SimConfig struct {
-	Width            float64 `json:"width"`
-	Height           float64 `json:"height"`
-	NumDrones        int     `json:"numDrones"`
-	NumSurvivors     int     `json:"numSurvivors"`
-	NumTraces        int     `json:"numTraces"`
-	DroneSpeed       float64 `json:"droneSpeed"`
-	DetectionRadius  float64 `json:"detectionRadius"`
-	CommRadius       float64 `json:"commRadius"`
-	MaxHelpersPerHit int     `json:"maxHelpersPerHit"`
-	TimeStep         float64 `json:"timeStep"`
+	Width            float64     `json:"width"`
+	Height           float64     `json:"height"`
+	NumDrones        int         `json:"numDrones"`
+	NumSurvivors     int         `json:"numSurvivors"`
+	NumTraces        int         `json:"numTraces"`
+	DroneSpeed       float64     `json:"droneSpeed"`      // default speed if no per-type speed
+	DetectionRadius  float64     `json:"detectionRadius"` // default per-drone detection radius
+	CommRadius       float64     `json:"commRadius"`
+	MaxHelpersPerHit int         `json:"maxHelpersPerHit"`
+	TimeStep         float64     `json:"timeStep"`
+	DroneTypes       []DroneType `json:"droneTypes"` // heterogeneous drone types
+
+	BaseX float64 `json:"baseX"` // base position X
+	BaseY float64 `json:"baseY"` // base position Y
 }
 
 // Statistiques globales de la simulation
@@ -99,8 +121,6 @@ type Agent interface {
 	Start()
 }
 
-// ---------------------- Agent Drone ------------------------
-
 type DroneAgent struct {
 	index         int
 	cfg           *SimConfig
@@ -131,7 +151,7 @@ func (d *DroneAgent) Act(env *Environment) {
 	cfg := env.Config
 	dr := &env.Drones[d.index]
 
-	// Timeout renfort pour éviter les blocages
+	// 0) Timeout renfort pour éviter les blocages
 	const respondTimeout = 8.0
 	if dr.Mode == ModeResponding {
 		dr.RespondTimer += cfg.TimeStep
@@ -150,35 +170,69 @@ func (d *DroneAgent) Act(env *Environment) {
 		return
 	}
 
-	// 1) Mouvement
+	// check distance avec la base
+	baseX := cfg.BaseX
+	baseY := cfg.BaseY
+	distToBase := distance(dr.X, dr.Y, baseX, baseY)
+
+	// si autonomie <= 1.1 * distance base, retour base (sécurité)
+	if dr.Mode != ModeReturning && dr.RemainingAutonomy <= 1.1*distToBase {
+		dr.Mode = ModeReturning
+		dr.HasTarget = true
+		dr.TargetX = baseX
+		dr.TargetY = baseY
+	}
+
+	dt := cfg.TimeStep
+
+	// 3) Mouvement selon le mode
 	switch dr.Mode {
 	case ModeSearching:
 		if rand.Float64() < 0.02 {
 			angle := rand.Float64() * 2 * math.Pi
-			dr.Vx = math.Cos(angle) * cfg.DroneSpeed
-			dr.Vy = math.Sin(angle) * cfg.DroneSpeed
+			dr.Vx = math.Cos(angle) * dr.Speed
+			dr.Vy = math.Sin(angle) * dr.Speed
 		}
+
 	case ModeResponding:
 		if dr.HasTarget {
 			dx := dr.TargetX - dr.X
 			dy := dr.TargetY - dr.Y
 			dist := math.Hypot(dx, dy)
 			if dist > 1 {
-				dr.Vx = dx / dist * cfg.DroneSpeed
-				dr.Vy = dy / dist * cfg.DroneSpeed
+				dr.Vx = dx / dist * dr.Speed
+				dr.Vy = dy / dist * dr.Speed
 			} else {
 				dr.Mode = ModeSearching
 				dr.HasTarget = false
+				dr.Vx, dr.Vy = 0, 0
 			}
+		}
+
+	case ModeReturning:
+		// go base
+		dx := baseX - dr.X
+		dy := baseY - dr.Y
+		dist := math.Hypot(dx, dy)
+		if dist > 1 {
+			dr.Vx = dx / dist * dr.Speed
+			dr.Vy = dy / dist * dr.Speed
+		} else {
+			// arrivé à base, reset auto et recherche
+			dr.X = baseX
+			dr.Y = baseY
+			dr.Vx, dr.Vy = 0, 0
+			dr.RemainingAutonomy = dr.Autonomy
+			dr.Mode = ModeSearching
+			dr.HasTarget = false
 		}
 	}
 
-	// Mise à jour position
-	dt := cfg.TimeStep
+	// 4) Mise à jour position
 	dr.X += dr.Vx * dt
 	dr.Y += dr.Vy * dt
 
-	// Bords
+	// 5) Bords
 	if dr.X < 0 {
 		dr.X = 0
 		dr.Vx = -dr.Vx
@@ -196,25 +250,45 @@ func (d *DroneAgent) Act(env *Environment) {
 		dr.Vy = -dr.Vy
 	}
 
-	// 2) Traces
+	// 6) Consommation d'autonomie (distance parcourue sur ce pas)
+	stepDist := math.Hypot(dr.Vx, dr.Vy) * dt
+	dr.RemainingAutonomy -= stepDist
+	if dr.RemainingAutonomy < 0 {
+		dr.RemainingAutonomy = 0
+	}
+
+	// 7) Si en mode retour, on ignore traces et survivants
+	if dr.Mode == ModeReturning {
+		return
+	}
+
+	detRadius := dr.DetectionRadius
+	if detRadius <= 0 {
+		detRadius = cfg.DetectionRadius
+		if detRadius <= 0 {
+			detRadius = 40
+		}
+	}
+
+	// 8) Traces
 	for ti := range env.Traces {
 		tr := &env.Traces[ti]
 		if tr.Consumed {
 			continue
 		}
-		if distance(dr.X, dr.Y, tr.X, tr.Y) <= cfg.DetectionRadius+tr.Radius {
+		if distance(dr.X, dr.Y, tr.X, tr.Y) <= detRadius+tr.Radius {
 			tr.Consumed = true
 			callNeighborsForHelp(env, d.index, ti)
 		}
 	}
 
-	// 3) Survivants
+	// 9) Survivants
 	for si := range env.Survivors {
 		s := &env.Survivors[si]
 		if s.Saved {
 			continue
 		}
-		if distance(dr.X, dr.Y, s.X, s.Y) <= cfg.DetectionRadius+s.Radius {
+		if distance(dr.X, dr.Y, s.X, s.Y) <= detRadius+s.Radius {
 			dr.Mode = ModeHovering
 			dr.X = s.X
 			dr.Y = s.Y
@@ -286,6 +360,9 @@ func defaultConfig() SimConfig {
 		CommRadius:       150,
 		MaxHelpersPerHit: 3,
 		TimeStep:         0.1,
+		DroneTypes:       nil,
+		BaseX:            -1,
+		BaseY:            -1,
 	}
 }
 
@@ -299,7 +376,7 @@ func (s *Simulation) Reset(cfg SimConfig) {
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		cfg.Width, cfg.Height = 1000, 700
 	}
-	if cfg.NumDrones <= 0 {
+	if cfg.NumDrones <= 0 && len(cfg.DroneTypes) == 0 {
 		cfg.NumDrones = 10
 	}
 	if cfg.DroneSpeed <= 0 {
@@ -320,30 +397,102 @@ func (s *Simulation) Reset(cfg SimConfig) {
 
 	rand.Seed(time.Now().UnixNano())
 
-	centerX := cfg.Width / 2
-	centerY := cfg.Height / 2
+	// pos de base
+	if cfg.BaseX < 0 || cfg.BaseY < 0 {
+		cfg.BaseX = cfg.Width / 2
+		cfg.BaseY = cfg.Height / 2
+	}
+	centerX := cfg.BaseX
+	centerY := cfg.BaseY
 
-	drones := make([]Drone, cfg.NumDrones)
-	agents := make([]Agent, cfg.NumDrones)
-	for i := range drones {
-		angle := rand.Float64() * 2 * math.Pi
-		speed := cfg.DroneSpeed
-		drones[i] = Drone{
-			ID:           i,
-			X:            centerX,
-			Y:            centerY,
-			Vx:           math.Cos(angle) * speed,
-			Vy:           math.Sin(angle) * speed,
-			Mode:         ModeSearching,
-			TargetX:      0,
-			TargetY:      0,
-			HasTarget:    false,
-			FoundID:      -1,
-			RespondTimer: 0,
+	var drones []Drone
+	var agents []Agent
+
+	// si config, construction drones
+	if len(cfg.DroneTypes) > 0 {
+		for _, dt := range cfg.DroneTypes {
+			if dt.Count <= 0 {
+				continue
+			}
+			speed := dt.Speed
+			if speed <= 0 {
+				speed = cfg.DroneSpeed
+			}
+			autonomy := dt.Autonomy
+			if autonomy <= 0 {
+				autonomy = cfg.Width + cfg.Height
+			}
+
+			detR := dt.DetectionRadius
+			if detR <= 0 {
+				detR = cfg.DetectionRadius
+				if detR <= 0 {
+					detR = 40 // final fallback
+				}
+			}
+
+			for i := 0; i < dt.Count; i++ {
+				angle := rand.Float64() * 2 * math.Pi
+				drone := Drone{
+					ID:                len(drones),
+					X:                 centerX,
+					Y:                 centerY,
+					Vx:                math.Cos(angle) * speed,
+					Vy:                math.Sin(angle) * speed,
+					Mode:              ModeSearching,
+					TargetX:           0,
+					TargetY:           0,
+					HasTarget:         false,
+					FoundID:           -1,
+					RespondTimer:      0,
+					Speed:             speed,
+					Weight:            dt.Weight,
+					Autonomy:          autonomy,
+					RemainingAutonomy: autonomy,
+					DetectionRadius:   detR,
+				}
+				drones = append(drones, drone)
+				agents = append(agents, NewDroneAgent(drone.ID, &cfg))
+			}
 		}
-		agents[i] = NewDroneAgent(i, &cfg)
+	} else {
+		// config de base
+		drones = make([]Drone, cfg.NumDrones)
+		agents = make([]Agent, cfg.NumDrones)
+
+		detR := cfg.DetectionRadius
+		if detR <= 0 {
+			detR = 40
+		}
+
+		for i := range drones {
+			angle := rand.Float64() * 2 * math.Pi
+			speed := cfg.DroneSpeed
+			autonomy := cfg.Width + cfg.Height // param arbitraire
+
+			drones[i] = Drone{
+				ID:                i,
+				X:                 centerX,
+				Y:                 centerY,
+				Vx:                math.Cos(angle) * speed,
+				Vy:                math.Sin(angle) * speed,
+				Mode:              ModeSearching,
+				TargetX:           0,
+				TargetY:           0,
+				HasTarget:         false,
+				FoundID:           -1,
+				RespondTimer:      0,
+				Speed:             speed,
+				Weight:            1.0,
+				Autonomy:          autonomy,
+				RemainingAutonomy: autonomy,
+				DetectionRadius:   detR,
+			}
+			agents[i] = NewDroneAgent(i, &cfg)
+		}
 	}
 
+	// Survivants
 	survivors := make([]Survivor, cfg.NumSurvivors)
 	for i := range survivors {
 		survivors[i] = Survivor{
@@ -355,16 +504,25 @@ func (s *Simulation) Reset(cfg SimConfig) {
 		}
 	}
 
+	traceBaseRadius := cfg.DetectionRadius
+	if traceBaseRadius <= 0 {
+		if len(drones) > 0 && drones[0].DetectionRadius > 0 {
+			traceBaseRadius = drones[0].DetectionRadius
+		} else {
+			traceBaseRadius = 40
+		}
+	}
+
+	// Traces
 	traces := make([]Trace, cfg.NumTraces)
 	if len(survivors) > 0 {
 		for i := range traces {
 			sv := &survivors[i%len(survivors)]
 
 			// Rayon de la trace : plus grand qu'avant
-			traceRadius := cfg.DetectionRadius * 1.5
+			traceRadius := traceBaseRadius * 1.5
 
-			// On veut que le survivant soit À L’INTÉRIEUR du cercle
-			// donc la distance centreTrace–survivant <= traceRadius - marge
+			// On veut que le survivant soit À L’INTÉRIEURE du cercle
 			margin := sv.Radius + 3
 			rMax := traceRadius - margin
 			if rMax < 0 {
@@ -406,7 +564,7 @@ func (s *Simulation) Reset(cfg SimConfig) {
 				ID:       i,
 				X:        rand.Float64() * cfg.Width,
 				Y:        rand.Float64() * cfg.Height,
-				Radius:   cfg.DetectionRadius * 1.5, // même rayon augmenté
+				Radius:   traceBaseRadius * 1.5,
 				Consumed: false,
 			}
 		}
@@ -561,8 +719,24 @@ func handleToggle(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func loadConfig(path string) SimConfig {
+	file, err := os.Open(path)
+	if err != nil {
+		log.Println("No config file found, using defaults.")
+		return defaultConfig()
+	}
+	defer file.Close()
+
+	var cfg SimConfig
+	if err := json.NewDecoder(file).Decode(&cfg); err != nil {
+		log.Println("Config file invalid, using defaults:", err)
+		return defaultConfig()
+	}
+	return cfg
+}
+
 func main() {
-	cfg := defaultConfig()
+	cfg := loadConfig("config.json")
 	sim = NewSimulation(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())

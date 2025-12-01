@@ -1,0 +1,28 @@
+{
+  "width": 1200,
+  "height": 800,
+  "numSurvivors": 6,
+  "numTraces": 10,
+  "commRadius": 200,
+  "timeStep": 0.1,
+  "detectionRadius": 50,
+
+  "droneTypes": [
+    {
+      "name": "fast",
+      "count": 5,
+      "speed": 80,
+      "autonomy": 1500,
+      "weight": 1.0,
+      "detectionRadius": 70
+    },
+    {
+      "name": "heavy",
+      "count": 3,
+      "speed": 40,
+      "autonomy": 3000,
+      "weight": 3.0,
+      "detectionRadius": 40
+    }
+  ]
+}
