@@ -3,7 +3,7 @@
   "height": 800,
   "numSurvivors": 6,
   "numTraces": 10,
-  "commRadius": 200,
+  "rayonAide": 200,
   "timeStep": 0.1,
   "detectionRadius": 50,
 
@@ -12,17 +12,17 @@
       "name": "fast",
       "count": 5,
       "speed": 80,
-      "autonomy": 1500,
+      "autonomy": 100000,
       "weight": 1.0,
-      "detectionRadius": 70
+      "detectionRadius": 40
     },
     {
       "name": "heavy",
-      "count": 3,
+      "count": 5,
       "speed": 40,
-      "autonomy": 3000,
+      "autonomy": 100000,
       "weight": 3.0,
-      "detectionRadius": 40
+      "detectionRadius": 70
     }
   ]
 }

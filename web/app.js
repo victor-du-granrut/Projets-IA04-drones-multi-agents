@@ -53,44 +53,94 @@ function drawWorld() {
   const scaleX = w / config.width;
   const scaleY = h / config.height;
 
+  // Fond sombre
   ctx.clearRect(0, 0, w, h);
-
   ctx.globalAlpha = 1;
-  ctx.fillStyle = "rgba(15,23,42,0.6)";
+  ctx.fillStyle = "#020617"; // très sombre
   ctx.fillRect(0, 0, w, h);
 
-  // Traces
+  // --- Traces de vie : n'afficher QUE la partie en intersection avec un ou plusieurs champs de vision ---
   traces.forEach((tr) => {
-    if (tr.consumed) return;
+    if (tr.consumed) return; // la trace est "morte" côté back
+
+    // On récupère les drones dont le champ de vision intersecte la trace
+    const seeingDrones = [];
+    for (const d of drones) {
+      const detRDrone = d.detectionRadius || config.detectionRadius || 40;
+      const dist = Math.hypot(d.x - tr.x, d.y - tr.y);
+      if (dist <= detRDrone + tr.radius) {
+        seeingDrones.push(d);
+      }
+    }
+
+    if (seeingDrones.length === 0) return; // aucun drone ne voit cette trace -> rien à dessiner
+
+    const cx = tr.x * scaleX;
+    const cy = tr.y * scaleY;
+    const traceR = tr.radius * scaleX; // on suppose scaleX ~ scaleY
+
+    ctx.save();
+
+    // 1) On clip sur le cercle de la trace
     ctx.beginPath();
-    ctx.strokeStyle = "rgba(168,85,247,0.7)";
-    ctx.lineWidth = 2;
-    ctx.arc(tr.x * scaleX, tr.y * scaleY, tr.radius * scaleX, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.arc(cx, cy, traceR, 0, Math.PI * 2);
+    ctx.clip();
+
+    // 2) On remplit avec la couleur de trace, mais uniquement à l'intérieur
+    //    des champs de vision des drones qui la voient
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "rgba(168,85,247,1)";
+
+    seeingDrones.forEach((d) => {
+      const vx = d.x * scaleX;
+      const vy = d.y * scaleY;
+      const detR =
+        (d.detectionRadius || config.detectionRadius || 40) * scaleX;
+
+      ctx.beginPath();
+      ctx.arc(vx, vy, detR, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
   });
 
-  // Survivants
+  // --- Survivants : cachés tant qu'ils ne sont pas trouvés ---
   survivors.forEach((s) => {
+    if (!s.saved) return; // on ignore les non trouvés
+
     ctx.beginPath();
-    ctx.fillStyle = s.saved
-      ? "rgba(34,197,94,0.9)"
-      : "rgba(249,115,22,0.9)";
-    const r = s.radius * scaleX;
+    const r = (s.radius || 6) * scaleX;
     ctx.arc(s.x * scaleX, s.y * scaleY, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(34,197,94,0.95)"; // vert vif pour "trouvé"
     ctx.fill();
   });
 
-  // Drones
+  // --- Drones + cercle de vision ---
   drones.forEach((d) => {
-    let color = "rgba(56,189,248,0.95)";
-    if (d.state === "responding") {
-      color = "rgba(251,191,36,0.95)";
-    } else if (d.state === "hovering") {
-      color = "rgba(34,197,94,0.95)";
-    }
-
     const x = d.x * scaleX;
     const y = d.y * scaleY;
+
+    // Rayon de vision (détection)
+    const detR =
+      (d.detectionRadius || config.detectionRadius || 40) * scaleX;
+
+    // Cercle de vision
+    ctx.beginPath();
+    ctx.arc(x, y, detR, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(148,163,184,0.25)"; // gris clair transparent
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Corps du drone (on garde la flèche)
+    let color = "rgba(56,189,248,0.95)"; // bleu
+    if (d.state === "responding") {
+      color = "rgba(251,191,36,0.95)"; // jaune
+    } else if (d.state === "hovering") {
+      color = "rgba(34,197,94,0.95)"; // vert (si jamais encore utilisé)
+    }
+
     const angle = Math.atan2(d.vy, d.vx);
     const size = 8;
 
@@ -123,7 +173,7 @@ function drawWorld() {
     toggleBtn.disabled = true;
 
     ctx.save();
-    ctx.globalAlpha = 0.75;
+    ctx.globalAlpha = 0.85;
     ctx.fillStyle = "#020617";
     const boxW = w * 0.6;
     const boxH = h * 0.35;
@@ -147,7 +197,7 @@ function drawWorld() {
       `Nombre de drones : ${stats.drones}`,
       `Traces de vie utilisées : ${stats.tracesConsumed} / ${stats.traces}`,
       "",
-      "Clique sur \"Appliquer & reset\" pour relancer une nouvelle simulation.",
+      'Clique sur "Appliquer & reset" pour relancer une nouvelle simulation.',
     ];
 
     let y = boxY + 60;

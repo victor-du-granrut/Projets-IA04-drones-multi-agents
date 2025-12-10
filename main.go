@@ -57,11 +57,13 @@ type Survivor struct {
 }
 
 type Trace struct {
-	ID       int     `json:"id"`
-	X        float64 `json:"x"`
-	Y        float64 `json:"y"`
-	Radius   float64 `json:"radius"`
-	Consumed bool    `json:"consumed"`
+	ID         int     `json:"id"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Radius     float64 `json:"radius"`
+	Consumed   bool    `json:"consumed"`
+	SurvivorID int     `json:"survivorId"` // -1 si aucune
+	Activated  bool    `json:"-"`          // interne : renfort déjà appelé ou pas
 }
 
 // type of drones, loaded from JSON
@@ -82,13 +84,18 @@ type SimConfig struct {
 	NumTraces        int         `json:"numTraces"`
 	DroneSpeed       float64     `json:"droneSpeed"`      // default speed if no per-type speed
 	DetectionRadius  float64     `json:"detectionRadius"` // default per-drone detection radius
-	CommRadius       float64     `json:"commRadius"`
+	rayonAide        float64     `json:"rayonAide"`
 	MaxHelpersPerHit int         `json:"maxHelpersPerHit"`
 	TimeStep         float64     `json:"timeStep"`
 	DroneTypes       []DroneType `json:"droneTypes"` // heterogeneous drone types
 
 	BaseX float64 `json:"baseX"` // base position X
 	BaseY float64 `json:"baseY"` // base position Y
+
+	// paramètres entraînables
+	tailleIndice    float64 `json:"tailleIndice"`
+	tauxExploration float64 `json:"tauxExploration"`
+	dureeEngagement float64 `json:"dureeEngagement"`
 }
 
 // Statistiques globales de la simulation
@@ -151,11 +158,47 @@ func (d *DroneAgent) Act(env *Environment) {
 	cfg := env.Config
 	dr := &env.Drones[d.index]
 
-	// 0) Timeout renfort pour éviter les blocages
-	const respondTimeout = 8.0
+	// Rayon de zone de recherche autour d'une trace
+	zoneRadius := cfg.DetectionRadius * cfg.tailleIndice
+	if zoneRadius <= 0 {
+		zoneRadius = cfg.DetectionRadius
+		if zoneRadius <= 0 {
+			zoneRadius = 80 // fallback
+		}
+	}
+
+	// Si le drone est assigné à une zone (HasTarget = true),
+	// on vérifie s'il reste un survivant non sauvé dans cette zone.
+	if dr.HasTarget {
+		aliveInZone := false
+		for i := range env.Survivors {
+			s := &env.Survivors[i]
+			if s.Saved {
+				continue
+			}
+			if distance(s.X, s.Y, dr.TargetX, dr.TargetY) <= zoneRadius {
+				aliveInZone = true
+				break
+			}
+		}
+		if !aliveInZone {
+			// plus de survivant dans cette zone : on libère le drone
+			dr.HasTarget = false
+			if dr.Mode == ModeResponding {
+				dr.Mode = ModeSearching
+				dr.Vx, dr.Vy = 0, 0
+			}
+		}
+	}
+
+	// 0) Timeout renfort paramétrable pour éviter les blocages
+	dureeEngagement := cfg.dureeEngagement
+	if dureeEngagement <= 0 {
+		dureeEngagement = 8.0
+	}
 	if dr.Mode == ModeResponding {
 		dr.RespondTimer += cfg.TimeStep
-		if dr.RespondTimer > respondTimeout {
+		if dr.RespondTimer > dureeEngagement {
 			dr.Mode = ModeSearching
 			dr.HasTarget = false
 			dr.Vx, dr.Vy = 0, 0
@@ -188,10 +231,25 @@ func (d *DroneAgent) Act(env *Environment) {
 	// 3) Mouvement selon le mode
 	switch dr.Mode {
 	case ModeSearching:
-		if rand.Float64() < 0.02 {
-			angle := rand.Float64() * 2 * math.Pi
-			dr.Vx = math.Cos(angle) * dr.Speed
-			dr.Vy = math.Sin(angle) * dr.Speed
+		tauxExploration := cfg.tauxExploration
+		if tauxExploration <= 0 {
+			tauxExploration = 0.02
+		}
+
+		if dr.HasTarget {
+			// Recherche LOCALE dans la zone autour de la trace
+			if rand.Float64() < tauxExploration {
+				angle := rand.Float64() * 2 * math.Pi
+				dr.Vx = math.Cos(angle) * dr.Speed
+				dr.Vy = math.Sin(angle) * dr.Speed
+			}
+		} else {
+			// Recherche globale classique
+			if rand.Float64() < tauxExploration {
+				angle := rand.Float64() * 2 * math.Pi
+				dr.Vx = math.Cos(angle) * dr.Speed
+				dr.Vy = math.Sin(angle) * dr.Speed
+			}
 		}
 
 	case ModeResponding:
@@ -199,12 +257,13 @@ func (d *DroneAgent) Act(env *Environment) {
 			dx := dr.TargetX - dr.X
 			dy := dr.TargetY - dr.Y
 			dist := math.Hypot(dx, dy)
-			if dist > 1 {
+			// Tant qu'on est loin de la zone, on se rapproche
+			if dist > zoneRadius*0.8 {
 				dr.Vx = dx / dist * dr.Speed
 				dr.Vy = dy / dist * dr.Speed
 			} else {
+				// Une fois DANS la zone, on passe en recherche locale
 				dr.Mode = ModeSearching
-				dr.HasTarget = false
 				dr.Vx, dr.Vy = 0, 0
 			}
 		}
@@ -250,6 +309,26 @@ func (d *DroneAgent) Act(env *Environment) {
 		dr.Vy = -dr.Vy
 	}
 
+	// Si le drone est en recherche locale autour d'une trace,
+	// on le force à rester dans le cercle de rayon zoneRadius autour de TargetX/TargetY
+	if dr.HasTarget && dr.Mode == ModeSearching {
+		dx := dr.X - dr.TargetX
+		dy := dr.Y - dr.TargetY
+		dist := math.Hypot(dx, dy)
+		if dist > zoneRadius {
+			// on le ramène sur le bord du cercle
+			if dist > 0 {
+				dr.X = dr.TargetX + dx/dist*zoneRadius
+				dr.Y = dr.TargetY + dy/dist*zoneRadius
+			} else {
+				// au cas où (exactement au centre), petit déplacement aléatoire
+				angle := rand.Float64() * 2 * math.Pi
+				dr.X = dr.TargetX + math.Cos(angle)*zoneRadius*0.5
+				dr.Y = dr.TargetY + math.Sin(angle)*zoneRadius*0.5
+			}
+		}
+	}
+
 	// 6) Consommation d'autonomie (distance parcourue sur ce pas)
 	stepDist := math.Hypot(dr.Vx, dr.Vy) * dt
 	dr.RemainingAutonomy -= stepDist
@@ -277,11 +356,16 @@ func (d *DroneAgent) Act(env *Environment) {
 			continue
 		}
 		if distance(dr.X, dr.Y, tr.X, tr.Y) <= detRadius+tr.Radius {
-			tr.Consumed = true
-			callNeighborsForHelp(env, d.index, ti)
+			// La trace NE disparaît plus ici
+			// On appelle les renforts UNE SEULE FOIS
+			if !tr.Activated {
+				tr.Activated = true
+				callNeighborsForHelp(env, d.index, ti)
+			}
 		}
 	}
 
+	// 9) Survivants
 	// 9) Survivants
 	for si := range env.Survivors {
 		s := &env.Survivors[si]
@@ -289,13 +373,20 @@ func (d *DroneAgent) Act(env *Environment) {
 			continue
 		}
 		if distance(dr.X, dr.Y, s.X, s.Y) <= detRadius+s.Radius {
-			dr.Mode = ModeHovering
-			dr.X = s.X
-			dr.Y = s.Y
-			dr.Vx, dr.Vy = 0, 0
-			dr.HasTarget = false
-			dr.FoundID = s.ID
+			// Le drone détecte le survivant
 			s.Saved = true
+			dr.FoundID = s.ID
+
+			// Il n'a plus de cible spécifique
+			dr.HasTarget = false
+
+			// S'il était en mode renfort, il repasse en recherche
+			if dr.Mode != ModeReturning {
+				dr.Mode = ModeSearching
+			}
+
+			// IMPORTANT : on NE touche pas à dr.Vx / dr.Vy,
+			// il continue son chemin comme si de rien n’était
 			break
 		}
 	}
@@ -321,7 +412,7 @@ func callNeighborsForHelp(env *Environment, droneIndex, traceIndex int) {
 			continue
 		}
 		dist := distance(source.X, source.Y, d.X, d.Y)
-		if dist <= cfg.CommRadius {
+		if dist <= cfg.rayonAide {
 			neighbors = append(neighbors, candidate{idx: i, dist: dist})
 		}
 	}
@@ -357,12 +448,16 @@ func defaultConfig() SimConfig {
 		NumTraces:        8,
 		DroneSpeed:       50,
 		DetectionRadius:  40,
-		CommRadius:       150,
+		rayonAide:        150,
 		MaxHelpersPerHit: 3,
 		TimeStep:         0.1,
 		DroneTypes:       nil,
 		BaseX:            -1,
 		BaseY:            -1,
+
+		tailleIndice:    1.5,
+		tauxExploration: 0.02,
+		dureeEngagement: 8.0,
 	}
 }
 
@@ -385,8 +480,8 @@ func (s *Simulation) Reset(cfg SimConfig) {
 	if cfg.DetectionRadius <= 0 {
 		cfg.DetectionRadius = 40
 	}
-	if cfg.CommRadius <= 0 {
-		cfg.CommRadius = 150
+	if cfg.rayonAide <= 0 {
+		cfg.rayonAide = 150
 	}
 	if cfg.MaxHelpersPerHit <= 0 {
 		cfg.MaxHelpersPerHit = 3
@@ -394,11 +489,20 @@ func (s *Simulation) Reset(cfg SimConfig) {
 	if cfg.TimeStep <= 0 {
 		cfg.TimeStep = 0.1
 	}
+	if cfg.tailleIndice <= 0 {
+		cfg.tailleIndice = 1.5
+	}
+	if cfg.tauxExploration <= 0 {
+		cfg.tauxExploration = 0.02
+	}
+	if cfg.dureeEngagement <= 0 {
+		cfg.dureeEngagement = 8.0
+	}
 
 	rand.Seed(time.Now().UnixNano())
 
-	// pos de base
-	if cfg.BaseX < 0 || cfg.BaseY < 0 {
+	// pos de base : si pas définie, on centre
+	if cfg.BaseX <= 0 && cfg.BaseY <= 0 {
 		cfg.BaseX = cfg.Width / 2
 		cfg.BaseY = cfg.Height / 2
 	}
@@ -408,7 +512,7 @@ func (s *Simulation) Reset(cfg SimConfig) {
 	var drones []Drone
 	var agents []Agent
 
-	// si config, construction drones
+	// si config, construction drones typés
 	if len(cfg.DroneTypes) > 0 {
 		for _, dt := range cfg.DroneTypes {
 			if dt.Count <= 0 {
@@ -456,7 +560,7 @@ func (s *Simulation) Reset(cfg SimConfig) {
 			}
 		}
 	} else {
-		// config de base
+		// config de base : drones homogènes
 		drones = make([]Drone, cfg.NumDrones)
 		agents = make([]Agent, cfg.NumDrones)
 
@@ -513,16 +617,17 @@ func (s *Simulation) Reset(cfg SimConfig) {
 		}
 	}
 
-	// Traces
-	traces := make([]Trace, cfg.NumTraces)
+	// Traces : une par survivant
+	var traces []Trace
 	if len(survivors) > 0 {
+		traces = make([]Trace, len(survivors))
 		for i := range traces {
-			sv := &survivors[i%len(survivors)]
+			sv := &survivors[i]
 
-			// Rayon de la trace : plus grand qu'avant
-			traceRadius := traceBaseRadius * 1.5
+			// Rayon de la trace : param entraînable
+			traceRadius := traceBaseRadius * cfg.tailleIndice
 
-			// On veut que le survivant soit À L’INTÉRIEURE du cercle
+			// On veut que le survivant soit À L’INTÉRIEUR du cercle
 			margin := sv.Radius + 3
 			rMax := traceRadius - margin
 			if rMax < 0 {
@@ -550,22 +655,27 @@ func (s *Simulation) Reset(cfg SimConfig) {
 			}
 
 			traces[i] = Trace{
-				ID:       i,
-				X:        x,
-				Y:        y,
-				Radius:   traceRadius,
-				Consumed: false,
+				ID:         i,
+				X:          x,
+				Y:          y,
+				Radius:     traceRadius,
+				Consumed:   false,
+				SurvivorID: sv.ID,
+				Activated:  false,
 			}
 		}
 	} else {
-		// fallback si pas de survivants
+		// fallback si vraiment aucun survivant : traces libres sans lien
+		traces = make([]Trace, cfg.NumTraces)
 		for i := range traces {
 			traces[i] = Trace{
-				ID:       i,
-				X:        rand.Float64() * cfg.Width,
-				Y:        rand.Float64() * cfg.Height,
-				Radius:   traceBaseRadius * 1.5,
-				Consumed: false,
+				ID:         i,
+				X:          rand.Float64() * cfg.Width,
+				Y:          rand.Float64() * cfg.Height,
+				Radius:     traceBaseRadius * cfg.tailleIndice,
+				Consumed:   false,
+				SurvivorID: -1,
+				Activated:  false,
 			}
 		}
 	}
@@ -609,6 +719,20 @@ func (s *Simulation) step() {
 			savedCount++
 		} else {
 			allSaved = false
+		}
+	}
+
+	// 🔥 Mise à jour des traces : elles disparaissent quand le survivant associé est sauvé
+	for i := range s.env.Traces {
+		tr := &s.env.Traces[i]
+		if tr.Consumed {
+			continue
+		}
+		if tr.SurvivorID >= 0 && tr.SurvivorID < len(s.env.Survivors) {
+			sv := &s.env.Survivors[tr.SurvivorID]
+			if sv.Saved {
+				tr.Consumed = true
+			}
 		}
 	}
 
@@ -681,7 +805,10 @@ func (s *Simulation) ToggleRunning() bool {
 // ------------------------ HTTP ------------------------
 //
 
-var sim *Simulation
+var (
+	sim        *Simulation
+	baseConfig SimConfig
+)
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -698,15 +825,41 @@ func handleGetState(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleReset(w http.ResponseWriter, r *http.Request) {
-	var cfg SimConfig
+	var reqCfg SimConfig
 	if r.Body != nil {
 		defer r.Body.Close()
-		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
-			cfg = defaultConfig()
+		if err := json.NewDecoder(r.Body).Decode(&reqCfg); err != nil {
+			reqCfg = defaultConfig()
 		}
 	} else {
-		cfg = defaultConfig()
+		reqCfg = defaultConfig()
 	}
+
+	// On repart TOUJOURS de la config de base (avec policy apprise + droneTypes)
+	cfg := baseConfig
+
+	// On laisse l'utilisateur changer certains paramètres "scénario"
+	if reqCfg.NumSurvivors > 0 {
+		cfg.NumSurvivors = reqCfg.NumSurvivors
+	}
+	if reqCfg.NumTraces > 0 {
+		cfg.NumTraces = reqCfg.NumTraces
+	}
+	if reqCfg.DroneSpeed > 0 {
+		cfg.DroneSpeed = reqCfg.DroneSpeed
+	}
+	if reqCfg.DetectionRadius > 0 {
+		cfg.DetectionRadius = reqCfg.DetectionRadius
+	}
+	// On ne touche NumDrones que si on n'utilise pas de types de drones
+	if len(cfg.DroneTypes) == 0 && reqCfg.NumDrones > 0 {
+		cfg.NumDrones = reqCfg.NumDrones
+	}
+
+	// IMPORTANT : on NE SURCHARGE PAS rayonAide, MaxHelpers, tailleIndice,
+
+	// tauxExploration, dureeEngagement => on garde les valeurs apprises.
+
 	sim.Reset(cfg)
 	env := sim.Snapshot()
 	writeJSON(w, env)
@@ -735,8 +888,64 @@ func loadConfig(path string) SimConfig {
 	return cfg
 }
 
+// Config de policy apprise par le batch
+type LearnedPolicyConfig struct {
+	rayonAide        float64 `json:"rayonAide"`
+	MaxHelpersPerHit int     `json:"maxHelpersPerHit"`
+	tailleIndice     float64 `json:"tailleIndice"`
+	tauxExploration  float64 `json:"tauxExploration"`
+	dureeEngagement  float64 `json:"dureeEngagement"`
+}
+
+func loadBestPolicy(path string) (LearnedPolicyConfig, bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return LearnedPolicyConfig{}, false
+	}
+	defer file.Close()
+
+	var pol LearnedPolicyConfig
+	if err := json.NewDecoder(file).Decode(&pol); err != nil {
+		log.Println("best_policy.json invalide, ignoré:", err)
+		return LearnedPolicyConfig{}, false
+	}
+	return pol, true
+}
+
 func main() {
+	// Mode batch offline
+	if os.Getenv("TRAIN_BATCH") == "1" {
+		RunBatchTraining()
+		return
+	}
+
+	// Mode serveur normal
 	cfg := loadConfig("config.json")
+
+	// surcharge avec la policy apprise si présente
+	if pol, ok := loadBestPolicy("best_policy.json"); ok {
+		if pol.rayonAide > 0 {
+			cfg.rayonAide = pol.rayonAide
+		}
+		if pol.MaxHelpersPerHit > 0 {
+			cfg.MaxHelpersPerHit = pol.MaxHelpersPerHit
+		}
+		if pol.tailleIndice > 0 {
+			cfg.tailleIndice = pol.tailleIndice
+		}
+		if pol.tauxExploration > 0 {
+			cfg.tauxExploration = pol.tauxExploration
+		}
+		if pol.dureeEngagement > 0 {
+			cfg.dureeEngagement = pol.dureeEngagement
+		}
+		log.Printf("Using learned policy: rayonAide=%.1f, maxHelpers=%d, traceFactor=%.2f, exploreRate=%.3f, timeout=%.1fs",
+			cfg.rayonAide, cfg.MaxHelpersPerHit, cfg.tailleIndice, cfg.tauxExploration, cfg.dureeEngagement)
+	}
+
+	// on garde cette config comme "base" avec entraînement appliqué
+	baseConfig = cfg
+
 	sim = NewSimulation(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
