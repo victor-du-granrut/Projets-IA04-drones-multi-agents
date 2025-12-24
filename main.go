@@ -193,7 +193,9 @@ func (d *DroneAgent) Act(env *Environment) {
 			dr.HasTarget = false
 			if dr.Mode == ModeResponding {
 				dr.Mode = ModeSearching
-				dr.Vx, dr.Vy = 0, 0
+				angle := rand.Float64() * 2 * math.Pi
+				dr.Vx = math.Cos(angle) * dr.Speed
+				dr.Vy = math.Sin(angle) * dr.Speed
 			}
 		}
 	}
@@ -208,7 +210,9 @@ func (d *DroneAgent) Act(env *Environment) {
 		if dr.RespondTimer > dureeEngagement {
 			dr.Mode = ModeSearching
 			dr.HasTarget = false
-			dr.Vx, dr.Vy = 0, 0
+			angle := rand.Float64() * 2 * math.Pi
+			dr.Vx = math.Cos(angle) * dr.Speed
+			dr.Vy = math.Sin(angle) * dr.Speed
 		}
 	} else {
 		dr.RespondTimer = 0
@@ -224,8 +228,9 @@ func (d *DroneAgent) Act(env *Environment) {
 	nearestX, nearestY := findNearestChargingPoint(dr.X, dr.Y, env.ChargingPoints)
 	distToNearest := distance(dr.X, dr.Y, nearestX, nearestY)
 
-	// si autonomie <= 1.1 * distance au point de charge le plus proche, retour (sécurité)
-	if dr.Mode != ModeReturning && dr.RemainingAutonomy <= 1.1*distToNearest {
+	// si autonomie <= 1.1 * temps estimé pour atteindre le point de charge, retour (sécurité)
+	timeToReach := distToNearest / dr.Speed
+	if dr.Mode != ModeReturning && dr.RemainingAutonomy <= 1.1*timeToReach {
 		dr.Mode = ModeReturning
 		dr.HasTarget = true
 		dr.TargetX = nearestX
@@ -270,26 +275,29 @@ func (d *DroneAgent) Act(env *Environment) {
 			} else {
 				// Une fois DANS la zone, on passe en recherche locale
 				dr.Mode = ModeSearching
-				dr.Vx, dr.Vy = 0, 0
+				angle := rand.Float64() * 2 * math.Pi
+				dr.Vx = math.Cos(angle) * dr.Speed
+				dr.Vy = math.Sin(angle) * dr.Speed
 			}
 		}
 
 	case ModeReturning:
-		// go to nearest charging point
+		// retour au pt de charge le plus proche
 		dx := dr.TargetX - dr.X
 		dy := dr.TargetY - dr.Y
 		dist := math.Hypot(dx, dy)
-		if dist > 1 {
+		if dist > 5 {
 			dr.Vx = dx / dist * dr.Speed
 			dr.Vy = dy / dist * dr.Speed
 		} else {
-			// arrivé au point de charge, reset auto et recherche
-			dr.X = dr.TargetX
-			dr.Y = dr.TargetY
-			dr.Vx, dr.Vy = 0, 0
+			// arrivé près du point de charge, reset auto et recherche
 			dr.RemainingAutonomy = dr.Autonomy
 			dr.Mode = ModeSearching
 			dr.HasTarget = false
+			//  direction random
+			angle := rand.Float64() * 2 * math.Pi
+			dr.Vx = math.Cos(angle) * dr.Speed
+			dr.Vy = math.Sin(angle) * dr.Speed
 		}
 	}
 
@@ -335,9 +343,8 @@ func (d *DroneAgent) Act(env *Environment) {
 		}
 	}
 
-	// 6) Consommation d'autonomie (distance parcourue sur ce pas)
-	stepDist := math.Hypot(dr.Vx, dr.Vy) * dt
-	dr.RemainingAutonomy -= stepDist
+	// 6) Consommation d'autonomie (temps écoulé sur ce pas)
+	dr.RemainingAutonomy -= dt
 	if dr.RemainingAutonomy < 0 {
 		dr.RemainingAutonomy = 0
 	}
@@ -362,7 +369,7 @@ func (d *DroneAgent) Act(env *Environment) {
 			continue
 		}
 		if distance(dr.X, dr.Y, tr.X, tr.Y) <= detRadius+tr.Radius {
-			// La trace NE disparaît plus ici
+			// La trace disparaît ici après détection
 			// On appelle les renforts UNE SEULE FOIS
 			if !tr.Activated {
 				tr.Activated = true
@@ -558,7 +565,7 @@ func (s *Simulation) Reset(cfg SimConfig) {
 			}
 			autonomy := dt.Autonomy
 			if autonomy <= 0 {
-				autonomy = cfg.Width + cfg.Height
+				autonomy = 10.0 // default time-based autonomy in seconds
 			}
 
 			detR := dt.DetectionRadius
@@ -606,7 +613,7 @@ func (s *Simulation) Reset(cfg SimConfig) {
 		for i := range drones {
 			angle := rand.Float64() * 2 * math.Pi
 			speed := cfg.DroneSpeed
-			autonomy := cfg.Width + cfg.Height // param arbitraire
+			autonomy := 20.0 // default time-based autonomy in seconds
 
 			drones[i] = Drone{
 				ID:                i,
@@ -949,6 +956,7 @@ func loadBestPolicy(path string) (LearnedPolicyConfig, bool) {
 
 func main() {
 	// Mode batch offline
+	print("os.Getenv(TRAIN_BATCH) =", os.Getenv("TRAIN_BATCH"))
 	if os.Getenv("TRAIN_BATCH") == "1" {
 		RunBatchTraining()
 		return
@@ -958,22 +966,12 @@ func main() {
 	cfg := loadConfig("config.json")
 
 	// surcharge avec la policy apprise si présente
-	if pol, ok := loadBestPolicy("best_policy.json"); ok {
-		if pol.rayonAide > 0 {
-			cfg.rayonAide = pol.rayonAide
-		}
-		if pol.MaxHelpersPerHit > 0 {
-			cfg.MaxHelpersPerHit = pol.MaxHelpersPerHit
-		}
-		if pol.tailleIndice > 0 {
-			cfg.tailleIndice = pol.tailleIndice
-		}
-		if pol.tauxExploration > 0 {
-			cfg.tauxExploration = pol.tauxExploration
-		}
-		if pol.dureeEngagement > 0 {
-			cfg.dureeEngagement = pol.dureeEngagement
-		}
+	if _, ok := loadBestPolicy("best_policy.json"); ok {
+		cfg.rayonAide = 356.8
+		cfg.MaxHelpersPerHit = 2
+		cfg.tailleIndice = 2.97
+		cfg.tauxExploration = 0.012
+		cfg.dureeEngagement = 8.1
 		log.Printf("Using learned policy: rayonAide=%.1f, maxHelpers=%d, traceFactor=%.2f, exploreRate=%.3f, timeout=%.1fs",
 			cfg.rayonAide, cfg.MaxHelpersPerHit, cfg.tailleIndice, cfg.tauxExploration, cfg.dureeEngagement)
 	}

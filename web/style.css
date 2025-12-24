@@ -204,6 +204,14 @@ body {
   background: #22c55e;
 }
 
+.drone-return {
+  background: #ff0000 !important;
+}
+
+.charging-pt {
+  background: #ffd700;
+}
+
 .trace {
   background: #a855f7;
 }

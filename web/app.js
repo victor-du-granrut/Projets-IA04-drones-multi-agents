@@ -44,7 +44,7 @@ async function apiToggle() {
 function drawWorld() {
   if (!currentWorld) return;
 
-  const { config, drones, survivors, traces, time, finished, stats } =
+  const { config, drones, survivors, traces, chargingPoints, time, finished, stats } =
     currentWorld;
 
   const w = canvas.width;
@@ -117,6 +117,15 @@ function drawWorld() {
     ctx.fill();
   });
 
+  // --- Points de charge ---
+  (currentWorld.chargingPoints || []).forEach((cp) => {
+    ctx.beginPath();
+    const r = 12 * scaleX;
+    ctx.arc(cp.x * scaleX, cp.y * scaleY, r, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,215,0,0.95)"; // gold
+    ctx.fill();
+  });
+
   // --- Drones + cercle de vision ---
   drones.forEach((d) => {
     const x = d.x * scaleX;
@@ -138,7 +147,9 @@ function drawWorld() {
     if (d.state === "responding") {
       color = "rgba(251,191,36,0.95)"; // jaune
     } else if (d.state === "hovering") {
-      color = "rgba(34,197,94,0.95)"; // vert (si jamais encore utilisé)
+      color = "rgba(34,197,94,0.95)"; // vert
+    } else if (d.state === "returning") {
+      color = "rgba(255,0,0,0.95)"; // rouge 
     }
 
     const angle = Math.atan2(d.vy, d.vx);
