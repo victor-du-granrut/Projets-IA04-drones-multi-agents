@@ -66,6 +66,12 @@ type Trace struct {
 	Activated  bool    `json:"-"`          // interne : renfort déjà appelé ou pas
 }
 
+type ChargingPoint struct {
+	ID int     `json:"id"`
+	X  float64 `json:"x"`
+	Y  float64 `json:"y"`
+}
+
 // type of drones, loaded from JSON
 type DroneType struct {
 	Name            string  `json:"name"`
@@ -77,20 +83,20 @@ type DroneType struct {
 }
 
 type SimConfig struct {
-	Width            float64     `json:"width"`
-	Height           float64     `json:"height"`
-	NumDrones        int         `json:"numDrones"`
-	NumSurvivors     int         `json:"numSurvivors"`
-	NumTraces        int         `json:"numTraces"`
-	DroneSpeed       float64     `json:"droneSpeed"`      // default speed if no per-type speed
-	DetectionRadius  float64     `json:"detectionRadius"` // default per-drone detection radius
-	rayonAide        float64     `json:"rayonAide"`
-	MaxHelpersPerHit int         `json:"maxHelpersPerHit"`
-	TimeStep         float64     `json:"timeStep"`
-	DroneTypes       []DroneType `json:"droneTypes"` // heterogeneous drone types
-
-	BaseX float64 `json:"baseX"` // base position X
-	BaseY float64 `json:"baseY"` // base position Y
+	Width            float64         `json:"width"`
+	Height           float64         `json:"height"`
+	NumDrones        int             `json:"numDrones"`
+	NumSurvivors     int             `json:"numSurvivors"`
+	NumTraces        int             `json:"numTraces"`
+	DroneSpeed       float64         `json:"droneSpeed"`      // default speed if no per-type speed
+	DetectionRadius  float64         `json:"detectionRadius"` // default per-drone detection radius
+	rayonAide        float64         `json:"rayonAide"`
+	MaxHelpersPerHit int             `json:"maxHelpersPerHit"`
+	TimeStep         float64         `json:"timeStep"`
+	DroneTypes       []DroneType     `json:"droneTypes"` // heterogeneous drone types
+	ChargingPoints   []ChargingPoint `json:"chargingPoints"`
+	BaseX            float64         `json:"baseX"` // base position X
+	BaseY            float64         `json:"baseY"` // base position Y
 
 	// paramètres entraînables
 	tailleIndice    float64 `json:"tailleIndice"`
@@ -110,13 +116,14 @@ type SimStats struct {
 }
 
 type Environment struct {
-	Config    SimConfig  `json:"config"`
-	Drones    []Drone    `json:"drones"`
-	Survivors []Survivor `json:"survivors"`
-	Traces    []Trace    `json:"traces"`
-	Time      float64    `json:"time"`
-	Finished  bool       `json:"finished"`
-	Stats     SimStats   `json:"stats"`
+	Config         SimConfig       `json:"config"`
+	Drones         []Drone         `json:"drones"`
+	Survivors      []Survivor      `json:"survivors"`
+	Traces         []Trace         `json:"traces"`
+	ChargingPoints []ChargingPoint `json:"chargingPoints"`
+	Time           float64         `json:"time"`
+	Finished       bool            `json:"finished"`
+	Stats          SimStats        `json:"stats"`
 }
 
 // Interface agent
@@ -213,17 +220,16 @@ func (d *DroneAgent) Act(env *Environment) {
 		return
 	}
 
-	// check distance avec la base
-	baseX := cfg.BaseX
-	baseY := cfg.BaseY
-	distToBase := distance(dr.X, dr.Y, baseX, baseY)
+	// check distance avec le point de charge le plus proche
+	nearestX, nearestY := findNearestChargingPoint(dr.X, dr.Y, env.ChargingPoints)
+	distToNearest := distance(dr.X, dr.Y, nearestX, nearestY)
 
-	// si autonomie <= 1.1 * distance base, retour base (sécurité)
-	if dr.Mode != ModeReturning && dr.RemainingAutonomy <= 1.1*distToBase {
+	// si autonomie <= 1.1 * distance au point de charge le plus proche, retour (sécurité)
+	if dr.Mode != ModeReturning && dr.RemainingAutonomy <= 1.1*distToNearest {
 		dr.Mode = ModeReturning
 		dr.HasTarget = true
-		dr.TargetX = baseX
-		dr.TargetY = baseY
+		dr.TargetX = nearestX
+		dr.TargetY = nearestY
 	}
 
 	dt := cfg.TimeStep
@@ -269,17 +275,17 @@ func (d *DroneAgent) Act(env *Environment) {
 		}
 
 	case ModeReturning:
-		// go base
-		dx := baseX - dr.X
-		dy := baseY - dr.Y
+		// go to nearest charging point
+		dx := dr.TargetX - dr.X
+		dy := dr.TargetY - dr.Y
 		dist := math.Hypot(dx, dy)
 		if dist > 1 {
 			dr.Vx = dx / dist * dr.Speed
 			dr.Vy = dy / dist * dr.Speed
 		} else {
-			// arrivé à base, reset auto et recherche
-			dr.X = baseX
-			dr.Y = baseY
+			// arrivé au point de charge, reset auto et recherche
+			dr.X = dr.TargetX
+			dr.Y = dr.TargetY
 			dr.Vx, dr.Vy = 0, 0
 			dr.RemainingAutonomy = dr.Autonomy
 			dr.Mode = ModeSearching
@@ -439,6 +445,30 @@ type Simulation struct {
 	running bool
 }
 
+func defaultChargingPoints(cfg SimConfig) []ChargingPoint {
+	w := cfg.Width
+	h := cfg.Height
+
+	points := []ChargingPoint{
+		{ID: 0, X: w * 0.25, Y: h * 0.25}, // centre du rect haut-gauche
+		{ID: 1, X: w * 0.50, Y: h * 0.50}, // centre du rect total
+		{ID: 2, X: w * 0.75, Y: h * 0.25}, // centre du rect haut-droite
+		{ID: 3, X: w * 0.75, Y: h * 0.75}, // centre du rect bas-droite
+		{ID: 4, X: w * 0.25, Y: h * 0.75}, //  centre du rect bas-gauche
+	}
+
+	return points
+}
+
+func addChargingPoint(cfg *SimConfig, x, y float64) {
+	id := len(cfg.ChargingPoints)
+	cfg.ChargingPoints = append(cfg.ChargingPoints, ChargingPoint{
+		ID: id,
+		X:  x,
+		Y:  y,
+	})
+}
+
 func defaultConfig() SimConfig {
 	return SimConfig{
 		Width:            1000,
@@ -452,6 +482,7 @@ func defaultConfig() SimConfig {
 		MaxHelpersPerHit: 3,
 		TimeStep:         0.1,
 		DroneTypes:       nil,
+		ChargingPoints:   nil,
 		BaseX:            -1,
 		BaseY:            -1,
 
@@ -497,6 +528,9 @@ func (s *Simulation) Reset(cfg SimConfig) {
 	}
 	if cfg.dureeEngagement <= 0 {
 		cfg.dureeEngagement = 8.0
+	}
+	if len(cfg.ChargingPoints) == 0 {
+		cfg.ChargingPoints = defaultChargingPoints(cfg)
 	}
 
 	rand.Seed(time.Now().UnixNano())
@@ -683,13 +717,14 @@ func (s *Simulation) Reset(cfg SimConfig) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.env = Environment{
-		Config:    cfg,
-		Drones:    drones,
-		Survivors: survivors,
-		Traces:    traces,
-		Time:      0,
-		Finished:  false,
-		Stats:     SimStats{},
+		Config:         cfg,
+		Drones:         drones,
+		Survivors:      survivors,
+		Traces:         traces,
+		ChargingPoints: cfg.ChargingPoints,
+		Time:           0,
+		Finished:       false,
+		Stats:          SimStats{},
 	}
 	s.agents = agents
 	s.running = true
@@ -977,6 +1012,23 @@ func main() {
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func findNearestChargingPoint(droneX, droneY float64, points []ChargingPoint) (float64, float64) {
+	if len(points) == 0 {
+		return 0, 0 // fallback, but shouldn't happen
+	}
+	minDist := math.Inf(1)
+	var nearestX, nearestY float64
+	for _, p := range points {
+		dist := distance(droneX, droneY, p.X, p.Y)
+		if dist < minDist {
+			minDist = dist
+			nearestX = p.X
+			nearestY = p.Y
+		}
+	}
+	return nearestX, nearestY
 }
 
 func distance(x1, y1, x2, y2 float64) float64 {

@@ -12,7 +12,7 @@
       "name": "fast",
       "count": 5,
       "speed": 80,
-      "autonomy": 100000,
+      "autonomy": 2500,
       "weight": 1.0,
       "detectionRadius": 40
     },
@@ -20,7 +20,7 @@
       "name": "heavy",
       "count": 5,
       "speed": 40,
-      "autonomy": 100000,
+      "autonomy": 1500,
       "weight": 3.0,
       "detectionRadius": 70
     }
