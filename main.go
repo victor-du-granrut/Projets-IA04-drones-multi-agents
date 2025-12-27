@@ -124,6 +124,7 @@ type Environment struct {
 	Time           float64         `json:"time"`
 	Finished       bool            `json:"finished"`
 	Stats          SimStats        `json:"stats"`
+	Heatmap        [][]float64     `json:"heatmap"`
 }
 
 // Interface agent
@@ -242,26 +243,41 @@ func (d *DroneAgent) Act(env *Environment) {
 	// 3) Mouvement selon le mode
 	switch dr.Mode {
 	case ModeSearching:
-		tauxExploration := cfg.tauxExploration
-		if tauxExploration <= 0 {
-			tauxExploration = 0.02
-		}
+    tauxExploration := cfg.tauxExploration
+    if tauxExploration <= 0 {
+        tauxExploration = 0.02
+    }
 
-		if dr.HasTarget {
-			// Recherche LOCALE dans la zone autour de la trace
-			if rand.Float64() < tauxExploration {
-				angle := rand.Float64() * 2 * math.Pi
-				dr.Vx = math.Cos(angle) * dr.Speed
-				dr.Vy = math.Sin(angle) * dr.Speed
-			}
-		} else {
-			// Recherche globale classique
-			if rand.Float64() < tauxExploration {
-				angle := rand.Float64() * 2 * math.Pi
-				dr.Vx = math.Cos(angle) * dr.Speed
-				dr.Vy = math.Sin(angle) * dr.Speed
-			}
-		}
+    if rand.Float64() < tauxExploration {
+
+        bestAngle := rand.Float64() * 2 * math.Pi
+        bestScore := math.Inf(-1)
+
+        for k := 0; k < 8; k++ {
+            angle := float64(k) * math.Pi / 4
+            nx := dr.X + math.Cos(angle)*30
+            ny := dr.Y + math.Sin(angle)*30
+
+            ix := int(nx / 20)
+            iy := int(ny / 20)
+
+            if ix >= 0 && iy >= 0 &&
+                ix < len(env.Heatmap) && iy < len(env.Heatmap[0]) {
+
+                h := env.Heatmap[ix][iy]
+                score := -h + rand.Float64()*0.1
+
+                if score > bestScore {
+                    bestScore = score
+                    bestAngle = angle
+                }
+            }
+        }
+
+        dr.Vx = math.Cos(bestAngle) * dr.Speed
+        dr.Vy = math.Sin(bestAngle) * dr.Speed
+    }
+
 
 	case ModeResponding:
 		if dr.HasTarget {
@@ -723,6 +739,14 @@ func (s *Simulation) Reset(cfg SimConfig) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	gridW := int(cfg.Width / 20)
+	gridH := int(cfg.Height / 20)
+
+	heat := make([][]float64, gridW)
+	for i := range heat {
+    	heat[i] = make([]float64, gridH)
+		}
+
 	s.env = Environment{
 		Config:         cfg,
 		Drones:         drones,
@@ -732,6 +756,7 @@ func (s *Simulation) Reset(cfg SimConfig) {
 		Time:           0,
 		Finished:       false,
 		Stats:          SimStats{},
+		Heatmap: heat,
 	}
 	s.agents = agents
 	s.running = true
@@ -752,6 +777,15 @@ func (s *Simulation) step() {
 	}
 
 	s.env.Time += s.env.Config.TimeStep
+	for _, d := range s.env.Drones {
+    	ix := int(d.X / 20)
+    	iy := int(d.Y / 20)
+
+    	if ix >= 0 && iy >= 0 && ix < len(s.env.Heatmap) && iy < len(s.env.Heatmap[0]) {
+        	s.env.Heatmap[ix][iy] += 1
+    		}
+		}
+
 
 	// Vérifier si tous les survivants sont sauvés
 	allSaved := true

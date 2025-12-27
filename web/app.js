@@ -4,9 +4,16 @@ const ctx = canvas.getContext("2d");
 const toggleBtn = document.getElementById("toggle-btn");
 const statusText = document.getElementById("status-text");
 const configForm = document.getElementById("config-form");
+const heatmapToggle = document.getElementById("toggle-heatmap");
+heatmapToggle.addEventListener("change", (e) => {
+  showHeatmap = e.target.checked;
+});
+
 
 let currentWorld = null;
 let running = true;
+let showHeatmap = true;
+
 
 async function apiReset(config) {
   const res = await fetch("/api/reset", {
@@ -105,6 +112,46 @@ function drawWorld() {
     ctx.globalAlpha = 1;
     ctx.restore();
   });
+  // --- HEATMAP EXPLORATION (thermal realistic) ---
+  if (currentWorld.heatmap && showHeatmap) {
+    const heat = currentWorld.heatmap;
+    const cellW = canvas.width / heat.length;
+    const cellH = canvas.height / heat[0].length;
+
+    let maxVal = 1;
+    for (let i = 0; i < heat.length; i++) {
+      for (let j = 0; j < heat[0].length; j++) {
+        if (heat[i][j] > maxVal) maxVal = heat[i][j];
+      }
+    }
+
+    function heatColor(t) {
+      // t in [0,1]  blue → cyan → green → yellow → red
+      const r = Math.min(255, Math.max(0,
+        255 * Math.max(0, Math.min(1, (t - 0.5) * 2))
+      ));
+      const g = Math.min(255, Math.max(0,
+        255 * Math.min(1, 1 - Math.abs(t - 0.5) * 2)
+      ));
+      const b = Math.min(255, Math.max(0,
+        255 * Math.max(0, Math.min(1, (0.5 - t) * 2))
+      ));
+      return `rgba(${r|0},${g|0},${b|0},0.35)`;
+    }
+
+    for (let i = 0; i < heat.length; i++) {
+      for (let j = 0; j < heat[0].length; j++) {
+        const v = heat[i][j];
+        if (v <= 0) continue;
+
+        const t = Math.min(v / maxVal, 1);
+        ctx.fillStyle = heatColor(t);
+        ctx.fillRect(i * cellW, j * cellH, cellW, cellH);
+      }
+    }
+  }
+
+
 
   // --- Survivants : cachés tant qu'ils ne sont pas trouvés ---
   survivors.forEach((s) => {
