@@ -152,6 +152,43 @@ function drawWorld() {
   }
 
 
+// --- budget ---
+const MAX_BUDGET = 100000;
+const droneInputs = document.querySelectorAll(".drone-input");
+const budgetDisplay = document.getElementById("budget-display");
+const totalCostDisplay = document.getElementById("total-cost");
+const errorMsg = document.getElementById("budget-error");
+const submitBtn = configForm.querySelector("button[type='submit']");
+
+function updateBudget() {
+  let total = 0;
+  droneInputs.forEach(input => {
+    const price = parseInt(input.dataset.price);
+    const count = parseInt(input.value) || 0;
+    total += price * count;
+  });
+
+  totalCostDisplay.textContent = total;
+  const remaining = MAX_BUDGET - total;
+  budgetDisplay.textContent = remaining;
+
+  if (remaining < 0) {
+    errorMsg.style.display = "block";
+    submitBtn.disabled = true;
+    budgetDisplay.style.color = "#ef4444";
+  } else {
+    errorMsg.style.display = "none";
+    submitBtn.disabled = false;
+    budgetDisplay.style.color = "#22c55e";
+  }
+}
+
+droneInputs.forEach(input => {
+  input.addEventListener("input", updateBudget);
+});
+
+updateBudget();
+
 
   // --- Survivants : cachés tant qu'ils ne sont pas trouvés ---
   survivors.forEach((s) => {
@@ -289,11 +326,38 @@ configForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const data = new FormData(configForm);
 
+  // Construction des types de drones basés sur les inputs
+  const droneTypes = [
+    {
+      name: "Scout",
+      count: Number(data.get("count_scout")),
+      speed: 90,
+      weight: 1.0,
+      autonomy: 15.0,
+      detectionRadius: 30
+    },
+    {
+      name: "Standard",
+      count: Number(data.get("count_standard")),
+      speed: 60,
+      weight: 2.0,
+      autonomy: 25.0,
+      detectionRadius: 50
+    },
+    {
+      name: "Heavy",
+      count: Number(data.get("count_heavy")),
+      speed: 30,
+      weight: 5.0,
+      autonomy: 40.0,
+      detectionRadius: 80
+    }
+  ];
+
   const config = {
-    numDrones: Number(data.get("numDrones")),
+    droneTypes: droneTypes, 
     numSurvivors: Number(data.get("numSurvivors")),
     numTraces: Number(data.get("numTraces")),
-    droneSpeed: Number(data.get("droneSpeed")),
     detectionRadius: Number(data.get("detectionRadius")),
     commRadius: Number(data.get("commRadius")),
     maxHelpersPerHit: Number(data.get("maxHelpersPerHit")),

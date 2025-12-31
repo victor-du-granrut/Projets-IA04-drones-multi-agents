@@ -243,41 +243,40 @@ func (d *DroneAgent) Act(env *Environment) {
 	// 3) Mouvement selon le mode
 	switch dr.Mode {
 	case ModeSearching:
-    tauxExploration := cfg.tauxExploration
-    if tauxExploration <= 0 {
-        tauxExploration = 0.02
-    }
+		tauxExploration := cfg.tauxExploration
+		if tauxExploration <= 0 {
+			tauxExploration = 0.02
+		}
 
-    if rand.Float64() < tauxExploration {
+		if rand.Float64() < tauxExploration {
 
-        bestAngle := rand.Float64() * 2 * math.Pi
-        bestScore := math.Inf(-1)
+			bestAngle := rand.Float64() * 2 * math.Pi
+			bestScore := math.Inf(-1)
 
-        for k := 0; k < 8; k++ {
-            angle := float64(k) * math.Pi / 4
-            nx := dr.X + math.Cos(angle)*30
-            ny := dr.Y + math.Sin(angle)*30
+			for k := 0; k < 8; k++ {
+				angle := float64(k) * math.Pi / 4
+				nx := dr.X + math.Cos(angle)*30
+				ny := dr.Y + math.Sin(angle)*30
 
-            ix := int(nx / 20)
-            iy := int(ny / 20)
+				ix := int(nx / 20)
+				iy := int(ny / 20)
 
-            if ix >= 0 && iy >= 0 &&
-                ix < len(env.Heatmap) && iy < len(env.Heatmap[0]) {
+				if ix >= 0 && iy >= 0 &&
+					ix < len(env.Heatmap) && iy < len(env.Heatmap[0]) {
 
-                h := env.Heatmap[ix][iy]
-                score := -h + rand.Float64()*0.1
+					h := env.Heatmap[ix][iy]
+					score := -h + rand.Float64()*0.1
 
-                if score > bestScore {
-                    bestScore = score
-                    bestAngle = angle
-                }
-            }
-        }
+					if score > bestScore {
+						bestScore = score
+						bestAngle = angle
+					}
+				}
+			}
 
-        dr.Vx = math.Cos(bestAngle) * dr.Speed
-        dr.Vy = math.Sin(bestAngle) * dr.Speed
-    }
-
+			dr.Vx = math.Cos(bestAngle) * dr.Speed
+			dr.Vy = math.Sin(bestAngle) * dr.Speed
+		}
 
 	case ModeResponding:
 		if dr.HasTarget {
@@ -744,8 +743,8 @@ func (s *Simulation) Reset(cfg SimConfig) {
 
 	heat := make([][]float64, gridW)
 	for i := range heat {
-    	heat[i] = make([]float64, gridH)
-		}
+		heat[i] = make([]float64, gridH)
+	}
 
 	s.env = Environment{
 		Config:         cfg,
@@ -756,7 +755,7 @@ func (s *Simulation) Reset(cfg SimConfig) {
 		Time:           0,
 		Finished:       false,
 		Stats:          SimStats{},
-		Heatmap: heat,
+		Heatmap:        heat,
 	}
 	s.agents = agents
 	s.running = true
@@ -778,14 +777,13 @@ func (s *Simulation) step() {
 
 	s.env.Time += s.env.Config.TimeStep
 	for _, d := range s.env.Drones {
-    	ix := int(d.X / 20)
-    	iy := int(d.Y / 20)
+		ix := int(d.X / 20)
+		iy := int(d.Y / 20)
 
-    	if ix >= 0 && iy >= 0 && ix < len(s.env.Heatmap) && iy < len(s.env.Heatmap[0]) {
-        	s.env.Heatmap[ix][iy] += 1
-    		}
+		if ix >= 0 && iy >= 0 && ix < len(s.env.Heatmap) && iy < len(s.env.Heatmap[0]) {
+			s.env.Heatmap[ix][iy] += 1
 		}
-
+	}
 
 	// Vérifier si tous les survivants sont sauvés
 	allSaved := true
@@ -911,10 +909,20 @@ func handleReset(w http.ResponseWriter, r *http.Request) {
 		reqCfg = defaultConfig()
 	}
 
-	// On repart TOUJOURS de la config de base (avec policy apprise + droneTypes)
+	// On repart de la config de base
 	cfg := baseConfig
 
-	// On laisse l'utilisateur changer certains paramètres "scénario"
+	if len(reqCfg.DroneTypes) > 0 {
+		// Si le front envoie des types, on les utilise
+		cfg.DroneTypes = reqCfg.DroneTypes
+		// On remet NumDrones à 0 pour forcer la logique par types dans Simulation.Reset
+		cfg.NumDrones = 0
+	} else if len(cfg.DroneTypes) == 0 && reqCfg.NumDrones > 0 {
+		// ancienne méthode (si pas de types)
+		cfg.NumDrones = reqCfg.NumDrones
+	}
+
+	// On laisse l'utilisateur changer certains paramètres
 	if reqCfg.NumSurvivors > 0 {
 		cfg.NumSurvivors = reqCfg.NumSurvivors
 	}
@@ -931,10 +939,6 @@ func handleReset(w http.ResponseWriter, r *http.Request) {
 	if len(cfg.DroneTypes) == 0 && reqCfg.NumDrones > 0 {
 		cfg.NumDrones = reqCfg.NumDrones
 	}
-
-	// IMPORTANT : on NE SURCHARGE PAS rayonAide, MaxHelpers, tailleIndice,
-
-	// tauxExploration, dureeEngagement => on garde les valeurs apprises.
 
 	sim.Reset(cfg)
 	env := sim.Snapshot()
