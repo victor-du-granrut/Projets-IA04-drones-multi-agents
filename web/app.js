@@ -354,14 +354,13 @@ configForm.addEventListener("submit", async (e) => {
     }
   ];
 
+  const filteredTypes = droneTypes.filter(t => (t.count || 0) > 0);
+
   const config = {
-    droneTypes: droneTypes, 
+    droneTypes: filteredTypes,
     numSurvivors: Number(data.get("numSurvivors")),
-    numTraces: Number(data.get("numTraces")),
-    detectionRadius: Number(data.get("detectionRadius")),
-    commRadius: Number(data.get("commRadius")),
-    maxHelpersPerHit: Number(data.get("maxHelpersPerHit")),
   };
+
 
   await apiReset(config);
   toggleBtn.disabled = false;
