@@ -24,6 +24,7 @@ const (
 	ModeResponding DroneMode = "responding"
 	ModeHovering   DroneMode = "hovering"
 	ModeReturning  DroneMode = "returning"
+	ModeCharging   DroneMode = "charging"
 )
 
 type Drone struct {
@@ -231,7 +232,7 @@ func (d *DroneAgent) Act(env *Environment) {
 
 	// si autonomie <= 1.1 * temps estimé pour atteindre le point de charge, retour (sécurité)
 	timeToReach := distToNearest / dr.Speed
-	if dr.Mode != ModeReturning && dr.RemainingAutonomy <= 1.1*timeToReach {
+	if dr.Mode != ModeReturning && dr.RemainingAutonomy <= 1.1*timeToReach && dr.Mode != ModeCharging {
 		dr.Mode = ModeReturning
 		dr.HasTarget = true
 		dr.TargetX = nearestX
@@ -301,15 +302,29 @@ func (d *DroneAgent) Act(env *Environment) {
 		dx := dr.TargetX - dr.X
 		dy := dr.TargetY - dr.Y
 		dist := math.Hypot(dx, dy)
+		// Seuil de proximité
 		if dist > 5 {
 			dr.Vx = dx / dist * dr.Speed
 			dr.Vy = dy / dist * dr.Speed
 		} else {
-			// arrivé près du point de charge, reset auto et recherche
-			dr.RemainingAutonomy = dr.Autonomy
+			// Arrivé au chargeur : on passe en mode CHARGE
+			dr.Mode = ModeCharging
+			dr.Vx, dr.Vy = 0, 0 // On s'arrête
+		}
+
+	case ModeCharging:
+		// Vitesse de recharge (points d'autonomie par seconde)
+		// Plus ce chiffre est bas, plus c'est long.
+		// Ex: 2.0 signifie qu'il recharge 2 secondes d'autonomie pour chaque seconde passée.
+		rechargeRate := 2.0
+		dr.RemainingAutonomy += dt * rechargeRate
+		// Si la batterie est pleine
+		if dr.RemainingAutonomy >= dr.Autonomy {
+			dr.RemainingAutonomy = dr.Autonomy // Plafond
+			// On repart en mission
 			dr.Mode = ModeSearching
 			dr.HasTarget = false
-			//  direction random
+			// Direction aléatoire pour quitter la base
 			angle := rand.Float64() * 2 * math.Pi
 			dr.Vx = math.Cos(angle) * dr.Speed
 			dr.Vy = math.Sin(angle) * dr.Speed

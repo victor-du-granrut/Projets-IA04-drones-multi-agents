@@ -1,7 +1,3 @@
 {
-  "maxHelpersPerHit": 2,
-  "rayonAide": 356.8,
-  "tailleIndice": 2.97,
-  "tauxExploration": 0.012,
-  "dureeEngagement": 8.1
+  "maxHelpersPerHit": 6
 }

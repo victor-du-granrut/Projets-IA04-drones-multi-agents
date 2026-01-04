@@ -234,6 +234,8 @@ updateBudget();
       color = "rgba(34,197,94,0.95)"; // vert
     } else if (d.state === "returning") {
       color = "rgba(255,0,0,0.95)"; // rouge 
+    } else if (d.state === "charging") {
+      color = "rgba(255, 255, 255, 0.95)"; // blanc
     }
 
     const angle = Math.atan2(d.vy, d.vx);
