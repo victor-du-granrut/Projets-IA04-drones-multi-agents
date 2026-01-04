@@ -313,18 +313,15 @@ func (d *DroneAgent) Act(env *Environment) {
 		}
 
 	case ModeCharging:
-		// Vitesse de recharge (points d'autonomie par seconde)
-		// Plus ce chiffre est bas, plus c'est long.
-		// Ex: 2.0 signifie qu'il recharge 2 secondes d'autonomie pour chaque seconde passée.
-		rechargeRate := 2.0
+		rechargeRate := 3.0
 		dr.RemainingAutonomy += dt * rechargeRate
-		// Si la batterie est pleine
+
 		if dr.RemainingAutonomy >= dr.Autonomy {
-			dr.RemainingAutonomy = dr.Autonomy // Plafond
-			// On repart en mission
+			dr.RemainingAutonomy = dr.Autonomy
+
 			dr.Mode = ModeSearching
 			dr.HasTarget = false
-			// Direction aléatoire pour quitter la base
+
 			angle := rand.Float64() * 2 * math.Pi
 			dr.Vx = math.Cos(angle) * dr.Speed
 			dr.Vy = math.Sin(angle) * dr.Speed

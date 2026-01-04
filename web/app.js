@@ -341,18 +341,18 @@ configForm.addEventListener("submit", async (e) => {
     {
       name: "Standard",
       count: Number(data.get("count_standard")),
-      speed: 60,
+      speed: 70,
       weight: 2.0,
       autonomy: 25.0,
-      detectionRadius: 50
+      detectionRadius: 80
     },
     {
       name: "Heavy",
       count: Number(data.get("count_heavy")),
-      speed: 30,
+      speed: 50,
       weight: 5.0,
       autonomy: 40.0,
-      detectionRadius: 80
+      detectionRadius: 150
     }
   ];
 
