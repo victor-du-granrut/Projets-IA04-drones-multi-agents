@@ -29,7 +29,10 @@ The system focuses on:
 
 ```bash
 go run .
+```
 
 ### Run simulation
+```bash
 $env:TRAIN_BATCH="1"
 go run .
+```
