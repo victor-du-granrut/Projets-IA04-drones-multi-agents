@@ -1,13 +1,35 @@
-# ia04_drone_recherche_et_sauvetage
+# Multi-Agent Drone Rescue Simulation
 
-Ce repo contient le projet d'optimisation de flotte de drones de sauvetage.
+This project implements a distributed multi-agent system to simulate coordination of drones in a search and rescue scenario.
 
-Pour lancer l'entrainement :
+## Overview
 
-$env:TRAIN_BATCH="1"
+The goal is to model how multiple autonomous agents (drones) can coordinate in a dynamic environment to efficiently explore an area and locate targets.
+
+The system focuses on:
+- distributed decision-making
+- agent coordination strategies
+- concurrent execution and communication
+
+## Features
+
+- Multi-agent simulation in a dynamic environment
+- Concurrent execution using Go (goroutines)
+- Communication between agents
+- Exploration and coordination logic
+
+## Tech Stack
+
+- Go (backend simulation, concurrency)
+- JavaScript (visualization)
+
+## Usage
+
+### Run simulation
+
+```bash
 go run .
 
-Pour lancer la simulation :
-
-$env:TRAIN_BATCH=""
+### Run simulation
+$env:TRAIN_BATCH="1"
 go run .
