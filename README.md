@@ -31,7 +31,7 @@ The system focuses on:
 go run .
 ```
 
-### Run simulation
+### Run training mode
 ```bash
 $env:TRAIN_BATCH="1"
 go run .
